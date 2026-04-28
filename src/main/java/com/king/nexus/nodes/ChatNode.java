@@ -7,52 +7,69 @@ import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.stereotype.Component;
 
 /**
- * 👑 帝国首席陪聊官 (ChatNode)
- * 作用：当老板(用户)不想查数据，只想闲聊、问候、或者问以前说过的话时，由他来接待。
- * 绝招：记性极好。因为他会带着从地下室(Redis)搬出来的整个档案袋(上下文记忆)，去找大模型聊天。
+ * 泛闲聊意图处理节点 (ChatNode)
+ *
+ * <p>路由定位：当请求经过意图识别判定为非数据查询类自然语言交互（如寒暄、记忆回溯、多轮上下文补充提问）时生效。
+ * <p>核心能力：基于携带状态补偿的上下文编排机制，将当前输入与从缓存层加载的历史会话记录合并为上下文窗口，
+ * 提交至大语言模型 (LLM) 进行连贯推理与自然语言生成 (NLG)。
+ * <p>生命周期：作为工作流图 (Graph) 的末端叶子节点，输出终态回答后将执行权归还给核心调度引擎，触发会话归档流程。
  */
 @Component
 public class ChatNode implements Node {
 
-    // 陪聊官没有自己的脑子，他只会把老板的话传给中央大脑 (LlmService)
+    // 大模型推理服务接入组件，负责底层 Prompt 组装与 LLM 的远程调用
     @Autowired
     private LlmService llmService;
 
+    /**
+     * 获取服务节点在拓扑图中的唯一寻址标识。
+     *
+     * @return 注册标识符 "node_chat"，供上层路由分发器在意图识别后进行下游节点挂载。
+     */
     @Override
     public String getId() {
-        // 这是他在花名册上的唯一代号，RouterNode 分配任务时就是喊这个名字
         return "node_chat";
     }
 
+    /**
+     * 执行泛闲聊意图的上下文编排与推理逻辑。
+     *
+     * <p>处理流程：
+     * <ol>
+     *   <li>将当前用户输入与从分布式缓存加载的历史对话列表合并，构建多轮对话上下文窗口。</li>
+     *   <li>调用 {@link LlmService} 进行基于 Prompt Engineering 的推理，该过程可能涉及长下文拼接与注意力对齐。</li>
+     *   <li>将 LLM 返回的终结态回答写入 {@link NodeContext#finalAnswer}，并释放控制权给调度引擎以触发异步历史状态持久化。</li>
+     * </ol>
+     *
+     * @param ctx 当前请求的完整执行上下文，承载全链路 Trace ID、历史会话、流式回调等元数据
+     * @return null，标识当前节点为工作流终点，不再触发后续节点的上下文流转
+     */
     @Override
     public String execute(NodeContext ctx) {
         ctx.addLog("ChatNode: 陪聊官就位，准备进入闲聊模式...");
 
         // ==========================================
-        // 核心动作：【带记忆的聊天】(Contextual Chat)
-        // 婴儿级解释：
-        // 如果这里只传 ctx.getOriginalQuery()，大模型就会像个金鱼，聊完这句忘上句。
-        // 所以，我们必须把 ctx.getHistoryList() (从 Redis 里捞出来的前世记忆) 也传进去！
-        // 这样大模型就能联系上下文，回答“那我刚才问的是什么水果？”这种问题了。
+        // 上下文装配：基于多轮会话状态的 Prompt 注入
+        // 将当前输入与从 Redis 获取的 HistoryList 进行序列化合并，解决上下文遗忘问题
+        // 以此支撑需要指代消解或记忆依赖的连续对话语义理解
         // ==========================================
 
         ctx.addLog(">>> 陪聊官正在打包老板的最新问题，并附上 " +
                 (ctx.getHistoryList() != null ? ctx.getHistoryList().size() : 0) +
                 " 条历史记忆，发往中央大脑...");
 
-        // 调用 LlmService 的重载方法 (带两个参数的那个)
+        // 调用大模型推理服务，执行深度语义计算与自然语言生成 (NLG)
         String response = llmService.chat(ctx.getOriginalQuery(), ctx.getHistoryList());
 
         // ==========================================
-        // 收尾动作：【记录答案】
-        // 婴儿级解释：把大模型说的话，记在档案袋的 finalAnswer 里。
-        // 引擎 (GraphEngine) 看到这个 finalAnswer 后，就知道活干完了，会自动把它存进 Redis 里。
+        // 终态结果回填：将生成回答挂载至上下文载体
+        // 调度引擎后续将基于此 finalAnswer 触发异步归档与 SSE 响应终结帧下发
         // ==========================================
         ctx.setFinalAnswer(response);
 
         ctx.addLog("✅ 陪聊官接待完毕，神明的回复已装袋。");
 
-        // 陪聊官也是流水线的终点站，聊完天就没事了，返回 null 结束整个流程。
+        // 返回 null 终止图调度，标示当前路由分支已完成全链路处理
         return null;
     }
 }
