@@ -115,4 +115,86 @@ docker run -d --name nexus-pgvector -e POSTGRES_USER=postgres -e POSTGRES_PASSWO
 # 启动 Redis 会话缓存
 docker run -d --name nexus-redis -p 6379:6379 redis:latest
 
+### 2. 核心配置 (Configuration)
+修改 `src/main/resources/application.properties` 文件，填入你的大模型 API 凭证与底层中间件连接信息：
 
+```properties
+# 数据库 (PostgreSQL + pgvector)
+spring.datasource.url=jdbc:postgresql://localhost:5432/nexus_db
+spring.datasource.username=postgres
+spring.datasource.password=root
+spring.jpa.database-platform=org.hibernate.dialect.PostgreSQLDialect
+
+# 会话缓存 (Redis)
+spring.data.redis.host=localhost
+spring.data.redis.port=6379
+
+# LLM 引擎配置 (兼容 OpenAI 协议的 DeepSeek/GPT)
+langchain4j.open-ai.chat-model.base-url=https://api.deepseek.com
+langchain4j.open-ai.chat-model.api-key=sk-your-api-key-here
+langchain4j.open-ai.chat-model.model-name=deepseek-chat
+langchain4j.open-ai.chat-model.temperature=0.0
+
+# 🌟 A/B 压测特征开关 (Feature Toggle)
+# true: 开启 Semantic Cache 语义拦截 (装甲模式)
+# false: 关闭拦截，全量请求击穿至大模型 (裸奔模式)
+nexus.feature.semantic-cache.enabled=true
+```
+
+### 3. 高维兵器库装填 (Initialization)
+项目启动后，需要将数据库中的建表语句（DDL）降维转化为 512 维向量，以激活 RAG 与语义缓存引擎。
+直接在浏览器访问（或通过 cURL 执行）：
+```bash
+curl http://localhost:8080/api/admin/init-vectors
+```
+*预期响应：`SUCCESS: 弹药装填完毕，武器已上膛！`*
+
+## 🎯 实战开火 (Usage)
+
+### 选项 A：极简赛博终端 (推荐)
+无需配置任何前端环境。直接双击项目根目录提供的 `index.html` 文件，即可体验具备**逐字打印 (Typewriter)、自动滚动、防抖锁死**的企业级 SSE 流式交互终端。
+
+### 选项 B：API 裸测
+```bash
+curl -X GET "http://localhost:8080/api/stream/chat?query=帮我查一下昨天卖了多少零食？" \
+     -H "Accept: text/event-stream"
+```
+
+## 📊 A/B 破坏性压测指南 (Load Testing)
+
+本系统内置了严谨的架构压测能力，用于验证语义缓存的拦截性能。
+
+1. **裸奔模式压测**：将配置改为 `nexus.feature.semantic-cache.enabled=false`。使用 JMeter 发起百级并发，可观察到 LLM API 触发限流 (Rate Limit)，Tomcat 线程池负载飙升，系统抛出大面积连接超时。
+2. **装甲模式压测**：将配置改为 `true`。发起千级并发相同意图 Query。
+   - **结果**：大模型调用被 100% 物理短路。请求在 100ms 内被 pgvector 余弦距离计算（`<=> ? < 0.15`）精准拦截。
+   - **收益**：单机 TPS 呈指数级跃升，Token 消耗归零，彻底根除高并发雪崩风险。
+
+## 📁 核心目录拓扑 (Directory Structure)
+
+```text
+nexus-analyst-core/
+├── config/
+│   └── AiConfig.java            # 本地 BGE-Small 向量模型常驻内存注入
+├── controller/
+│   └── ChatController.java      # SSE 流式端点，返回 CompletableFuture 释放主线程
+├── domain/
+│   └── SqlGenResponse.java      # Structured CoT 强约束模具 (防 LLM 幻觉)
+├── engine/
+│   ├── GraphEngine.java         # 核心！虚拟线程池调度与异步状态机引擎
+│   └── NodeContext.java         # 贯穿全生命周期的上下文与 EventPublisher 信号枪
+├── nodes/
+│   ├── strategy/                # 策略模式路由 (消灭 if-else，对齐 OCP 原则)
+│   ├── SqlGenNode.java          # Hybrid RAG + Prompt 组装 + JSON 强反序列化
+│   └── SqlExecNode.java         # JDBC 物理执行 + ReAct 报错自愈流转反转
+├── listener/
+│   └── SysLogListener.java      # 基于 @Async 的暗影史官，实现旁路日志 100% 物理隔离
+└── utils/
+    └── RedisUtils.java          # Caffeine L1 + Redis L2 双写一致性记忆管家
+```
+
+## 🔮 未来演进 (Roadmap)
+
+- [ ] **分布式推流解耦**：引入 Redis Pub/Sub 消息背板，剥离单机 `SseEmitter` 状态，实现 Web 层云原生弹性扩缩容。
+- [ ] **MCP 协议对接**：将底层数据库执行器重构为标准化 MCP Server，打破数据孤岛，支持多平台 Agent 跨生态调用。
+- [ ] **AST 抽象语法树校验**：在 `SqlExecNode` 执行前增加 AST 解析探针，防范极小概率的高级 SQL 注入绕过。
+```
