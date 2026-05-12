@@ -65,6 +65,7 @@ graph TD
     Engine -- "6. Event 异步落库" --> Log
     API -- "7. 流式响应完成" --> User
 ```
+
 # 👑 Nexus-Analyst: 企业级 Text-to-SQL 智能体高并发引擎
 
 ![Java](https://img.shields.io/badge/Java-21-blue?style=flat-square&logo=openjdk)
@@ -108,14 +109,17 @@ graph TD
 ## ⚙️ 快速启动 (Quick Start)
 
 ### 1. 环境准备
+
 ```bash
 # 启动带有 pgvector 扩展的 PostgreSQL
 docker run -d --name nexus-pgvector -e POSTGRES_USER=postgres -e POSTGRES_PASSWORD=root -e POSTGRES_DB=nexus_db -p 5432:5432 pgvector/pgvector:pg16
 
 # 启动 Redis 会话缓存
 docker run -d --name nexus-redis -p 6379:6379 redis:latest
+```
 
 ### 2. 核心配置 (Configuration)
+
 修改 `src/main/resources/application.properties` 文件，填入你的大模型 API 凭证与底层中间件连接信息：
 
 ```properties
@@ -142,8 +146,10 @@ nexus.feature.semantic-cache.enabled=true
 ```
 
 ### 3. 高维兵器库装填 (Initialization)
+
 项目启动后，需要将数据库中的建表语句（DDL）降维转化为 512 维向量，以激活 RAG 与语义缓存引擎。
 直接在浏览器访问（或通过 cURL 执行）：
+
 ```bash
 curl http://localhost:8080/api/admin/init-vectors
 ```
@@ -155,6 +161,7 @@ curl http://localhost:8080/api/admin/init-vectors
 无需配置任何前端环境。直接双击项目根目录提供的 `index.html` 文件，即可体验具备**逐字打印 (Typewriter)、自动滚动、防抖锁死**的企业级 SSE 流式交互终端。
 
 ### 选项 B：API 裸测
+
 ```bash
 curl -X GET "http://localhost:8080/api/stream/chat?query=帮我查一下昨天卖了多少零食？" \
      -H "Accept: text/event-stream"
@@ -197,4 +204,3 @@ nexus-analyst-core/
 - [ ] **分布式推流解耦**：引入 Redis Pub/Sub 消息背板，剥离单机 `SseEmitter` 状态，实现 Web 层云原生弹性扩缩容。
 - [ ] **MCP 协议对接**：将底层数据库执行器重构为标准化 MCP Server，打破数据孤岛，支持多平台 Agent 跨生态调用。
 - [ ] **AST 抽象语法树校验**：在 `SqlExecNode` 执行前增加 AST 解析探针，防范极小概率的高级 SQL 注入绕过。
-```
